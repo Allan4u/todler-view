@@ -4,13 +4,10 @@ local povCam = nil
 local toddlerBoneZOffset = 0.0
 local playerId = PlayerId()
 
--- =============================================
--- THREAD 1: Deteksi Tinggi Pintar & Anti False Positive
--- =============================================
 Citizen.CreateThread(function()
     local toddlerConfirmCount = 0
     local lastPed = nil
-    local smoothBoneOffset = 0.0  -- [FIX] Lerp boneOffset agar tidak lompat
+    local smoothBoneOffset = 0.0  
 
     while true do
         local playerPed = PlayerPedId()
@@ -22,17 +19,14 @@ Citizen.CreateThread(function()
         end
 
         if DoesEntityExist(playerPed) then
-            -- 1. Evaluasi Tinggi Box Model (Ini tidak terpengaruh animasi/jongkok/nyetir)
             local minDim, maxDim = GetModelDimensions(GetEntityModel(playerPed))
             local modelHeight = maxDim.z - minDim.z
 
-            -- 2. Fallback: Evaluasi Tulang Menggunakan Vektor Relatif 3D (Bukan cuma perbedaan Z)
             local headPos = GetPedBoneCoords(playerPed, 31086, 0.0, 0.0, 0.0)
             local footPos = GetPedBoneCoords(playerPed, 14201, 0.0, 0.0, 0.0)
-            -- Pakai panjang kemiringan asli (Pythagoras 3D), jadi kalau lari badannya condong ke depan, jarak tulang tidak menyusut!
+           
             local boneHeight = #(headPos - footPos)
 
-            -- Deteksi orang dewasa yang lagi merunduk, nyetir mobil, ragdoll, ATAU Lari Cepat (Speed > 3.0 m/s)
             local isScrunched = IsPedInAnyVehicle(playerPed, false) 
                              or IsPedDucking(playerPed) 
                              or IsPedRagdoll(playerPed) 
@@ -40,33 +34,28 @@ Citizen.CreateThread(function()
                              or IsPedFalling(playerPed)
                              or GetEntitySpeed(playerPed) > 3.0
             
-            -- Penentuan akhir tinggi untuk frame ini
             local detectedHeight = 99.0 
             
             if (modelHeight > 0.1 and modelHeight < TODDLER_HEIGHT_THRESHOLD) then
-                detectedHeight = modelHeight -- Memang bawaan model Custom Anak-Anak
+                detectedHeight = modelHeight 
             elseif not isScrunched then
-                detectedHeight = boneHeight  -- Bisa jadi model dewasa tapi diskala kecil oleh script server
+                detectedHeight = boneHeight  
             else
-                -- Orang dewasa lagi lari kencang, jongkok, atau nyetir.
-                -- Biarkan saja agar tidak merusak stickiness
+
             end
 
-            -- Evaluasi Sticky Count
             if detectedHeight > 0.1 and detectedHeight < TODDLER_HEIGHT_THRESHOLD then
                 toddlerConfirmCount = math.min(toddlerConfirmCount + 1, 3)
             elseif not isScrunched then
                 toddlerConfirmCount = math.max(toddlerConfirmCount - 1, 0)
             end
 
-            -- Penetapan Final
             if toddlerConfirmCount >= 2 then
                 isToddler = true
                 local boneZ = GetPedBoneCoords(playerPed, 11816, 0.0, 0.0, 0.0).z
                 local baseZ = GetEntityCoords(playerPed).z
                 local rawOffset = boneZ - baseZ
 
-                -- [FIX] Lerp offset agar perubahan bone tidak bikin kamera lompat
                 if smoothBoneOffset == 0.0 then
                     smoothBoneOffset = rawOffset
                 else
@@ -83,9 +72,6 @@ Citizen.CreateThread(function()
 end)
 
 
--- =============================================
--- THREAD 2: Kamera
--- =============================================
 Citizen.CreateThread(function()
     local math_rad = math.rad
     local math_sin = math.sin
@@ -96,7 +82,6 @@ Citizen.CreateThread(function()
     local lastViewMode = -1
     local lastPedX, lastPedY, lastPedZ = 0.0, 0.0, 0.0
 
-    -- [FIX] Smooth khusus untuk Z target saja (bukan XY, biar tidak delay saat jalan)
     local smoothTargetZ  = 0.0
     local smoothTargetZReady = false
 
@@ -146,8 +131,6 @@ Citizen.CreateThread(function()
                         smoothTargetZ = rawTargetZ
                         smoothTargetZReady = true
                     else
-                        -- Lerp Z saja: 0.15 = halus, tidak getar
-                        -- Naik ke 0.25 jika terasa terlalu lambat saat naik tangga
                         smoothTargetZ = smoothTargetZ + (rawTargetZ - smoothTargetZ) * 0.15
                     end
 
@@ -159,7 +142,6 @@ Citizen.CreateThread(function()
                     local dz = pCoords.z - lastPedZ
                     local pedMoved = (dx*dx + dy*dy + dz*dz) > 0.0001
 
-                    -- [FIX] Z smooth selalu diupdate tiap frame meski tidak ada input
                     local zChanged = math_abs(smoothTargetZ - (lastPedZ + toddlerBoneZOffset + 0.4)) > 0.001
 
                     if rotChanged or viewChanged or pedMoved or zChanged then
@@ -178,8 +160,6 @@ Citizen.CreateThread(function()
                         local dirY =  math_cos(radZ) * cosX
                         local dirZ =  math_sin(radX)
 
-                        -- XY langsung dari pCoords (responsif)
-                        -- Z pakai smoothTargetZ (anti-getar)
                         local targetX = pCoords.x
                         local targetY = pCoords.y
                         local targetZ = smoothTargetZ
